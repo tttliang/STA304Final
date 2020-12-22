@@ -1,0 +1,143 @@
+---
+title: "Predictions of 2019 Canadian Federal Election If All Eligible Citizens Had Voted"
+author: "Yichen Liang"
+date: "12/18/2020"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r,include=FALSE}
+library(tidyverse)
+library(haven)
+library(broom)
+library(labelled)
+library(lme4)
+devtools::install_github("hodgettsp/cesR")
+knitr::opts_chunk$set(echo = TRUE)
+library(cesR)
+library(janitor)
+
+
+# Read in the raw data 
+get_ces("ces2019_web")
+r_data <- to_factor(ces2019_web)
+head(ces2019_web)
+
+
+#Cleaning the CES data for Model Fitting
+
+
+data_2019_raw <- r_data %>%
+  mutate(cps19_age = case_when(cps19_age <= 30 ~ '18to30',
+                              cps19_age > 30 & cps19_age <= 40 ~ "31-40",
+                              cps19_age > 40 & cps19_age <= 50 ~ "41-50",
+                              cps19_age > 50 & cps19_age <= 60 ~ "51-60",
+                              cps19_age > 60 ~ "above60")) %>% 
+
+  select(cps19_ResponseId,cps19_citizenship,cps19_age,cps19_education,
+         cps19_province,cps19_gender,cps19_votechoice,
+         cps19_children,cps19_income_cat,cps19_marital) %>% na.omit()
+
+data_2019 <- filter(data_2019_raw, cps19_votechoice != "Don't know/ Prefer not to answer", 
+                    cps19_education != "Don't know/ Prefer not to answer",
+                    cps19_education != "No schooling") 
+
+data_2019 <- data_2019 %>%
+  mutate(liberal_yes = 
+           ifelse(cps19_votechoice =="Liberal Party", 1, 0)) %>% 
+  mutate(conservative_yes =
+           ifelse(cps19_votechoice =="Conservative Party", 1, 0)) %>%
+  mutate(ndp_yes =
+           ifelse(cps19_votechoice =="ndp", 1, 0))
+
+
+# Cleaning the GSS data for post-stratification
+raw_data <- read_csv("2011census.csv")
+
+gss_data <- raw_data %>%
+  select(CASEID, agec, agedc, agegr5, Sex, edu, incmc, prv, marstat )
+
+gss_new <- gss_data %>% 
+  clean_names() %>% 
+  rename(cps19_age = agec, cps19_gender = sex, cps19_education = edu, cps19_income_cat = incmc,
+         cps19_province = prv, cps19_marital = marstat)%>%
+  filter(cps19_age>= 18)%>%
+  mutate(cps19_age = case_when(cps19_age <= 30 ~ '18to30',
+                              cps19_age > 30 & cps19_age <= 40 ~ "31-40",
+                              cps19_age > 40 & cps19_age <= 50 ~ "41-50",
+                              cps19_age > 50 & cps19_age <= 60 ~ "51-60",
+                              cps19_age > 60 ~ "above60"))
+  
+#Model Construction
+
+model_liberal <- glm(liberal_yes ~ cps19_age + cps19_education +
+         cps19_gender + cps19_marital+ cps19_province, data = data_2019, family = binomial)
+
+summary(model_liberal)
+
+mean(AIC(model_liberal))
+mean(BIC(model_liberal))
+
+car::vif(model_liberal)
+
+model_con <- glm(conservative_yes ~ cps19_age + cps19_education +
+         cps19_gender + cps19_marital+ cps19_province, data = data_2019, family = binomial)
+
+summary(model_con)
+
+mean(AIC(model_con))
+mean(BIC(model_con))
+
+car::vif(model_con)
+
+model_ndp <- glm(ndp_yes ~ cps19_age + cps19_education +
+         cps19_gender + cps19_marital+ cps19_province, data = data_2019, family = binomial)
+
+summary(model_ndp)
+
+mean(AIC(model_ndp))
+mean(BIC(model_ndp))
+
+car::vif(model_ndp)
+
+#Post Stratification 
+gss_new$logodds_estimate_con <-
+  model_con %>%
+  predict(newdata = gss_new)
+
+gss_new$estimate_con <-
+  exp(gss_new$logodds_estimate_con)/(1+exp(gss_new$logodds_estimate_con))
+
+gss_new %>%
+  mutate(alp_predict_prop_con = estimate_con*21751) %>%
+  summarize(alp_predict_con = mean(alp_predict_prop_con/21751))
+
+
+gss_new$logodds_estimate_liberal <-
+  model_liberal %>%
+  predict(newdata = gss_new)
+
+gss_new$estimate_liberal <-
+  exp(gss_new$logodds_estimate_liberal)/(1+exp(gss_new$logodds_estimate_liberal))
+
+gss_new %>%
+  mutate(alp_predict_prop_liberal = estimate_liberal*21751) %>%
+  summarize(alp_predict_libearl = mean(alp_predict_prop_liberal/21751))
+
+gss_new$logodds_estimate_ndp <-
+  model_ndp %>%
+  predict(newdata = gss_new)
+
+gss_new$estimate_ndp <-
+  exp(gss_new$logodds_estimate_ndp)/(1+exp(gss_new$logodds_estimate_ndp))
+
+gss_new %>%
+  mutate(alp_predict_prop_ndp = estimate_ndp*21751) %>%
+  summarize(alp_predict_ndp = mean(alp_predict_prop_ndp/21751))
+
+```
+
+
+
